@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Obsolute Slop</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
+        #header { padding: 12px 20px; background: #16213e; border-bottom: 1px solid #0f3460; display: flex; align-items: center; gap: 12px; }
+        #header h1 { font-size: 16px; color: #e94560; }
+        #model-select { background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 4px 8px; font-family: monospace; font-size: 13px; }
+        #upload-label, #new-chat { background: #0f3460; color: #e0e0e0; border: 1px solid #1a4080; padding: 4px 12px; font-family: monospace; font-size: 13px; cursor: pointer; border-radius: 4px; }
+        #upload-label:hover, #new-chat:hover { background: #1a4080; }
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .msg { max-width: 80%; padding: 10px 14px; border-radius: 8px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; font-size: 14px; }
+        .msg.user { align-self: flex-end; background: #0f3460; }
+        .msg.assistant { align-self: flex-start; background: #16213e; border: 1px solid #0f3460; }
+        .msg .role { font-size: 11px; color: #e94560; margin-bottom: 4px; }
+        #input-area { padding: 12px 20px; background: #16213e; border-top: 1px solid #0f3460; display: flex; gap: 8px; }
+        #input { flex: 1; background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 10px 14px; font-family: monospace; font-size: 14px; border-radius: 6px; outline: none; }
+        #input:focus { border-color: #e94560; }
+        #send { background: #e94560; color: #fff; border: none; padding: 10px 20px; font-family: monospace; cursor: pointer; border-radius: 6px; font-size: 14px; }
+        #send:hover { background: #c73650; }
+        #send:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>Obsolute Slop</h1>
+        <select id="model-select">
+            <option value="accounts/fireworks/models/glm-5p1">GLM 5.1</option>
+            <option value="accounts/fireworks/models/deepseek-v4-pro">DeepSeek V4 Pro</option>
+            <option value="accounts/fireworks/models/kimi-k2p6">Kimi K2.6</option>
+            <option value="accounts/fireworks/models/glm-5">GLM 5</option>
+            <option value="accounts/fireworks/models/minimax-m2p7">MiniMax M2.7</option>
+        </select>
+        <label id="upload-label" for="file-input">Upload</label>
+        <input id="file-input" type="file" accept=".pdf,.txt,.md" hidden>
+        <button id="new-chat">New Chat</button>
+    </div>
+    <div id="messages"></div>
+    <div id="input-area">
+        <input id="input" type="text" placeholder="Type a message..." autocomplete="off">
+        <button id="send">Send</button>
+    </div>
+    <script>
+        const messagesEl = document.getElementById("messages");
+        const inputEl = document.getElementById("input");
+        const sendBtn = document.getElementById("send");
+        const modelSelect = document.getElementById("model-select");
+
+        let chatId = localStorage.getItem("chatId");
+
+        async function ensureChat() {
+            if (chatId) {
+                const res = await fetch(`/chats/${chatId}`);
+                if (res.ok) return;
+                chatId = null;
+                localStorage.removeItem("chatId");
+            }
+            const res = await fetch("/chats", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: "New chat" }),
+            });
+            const data = await res.json();
+            chatId = data.id;
+            localStorage.setItem("chatId", chatId);
+        }
+
+        function addMessage(role, content) {
+            const div = document.createElement("div");
+            div.className = `msg ${role}`;
+            div.innerHTML = `<div class="role">${role}</div>${content}`;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            return div;
+        }
+
+        async function sendMessage() {
+            const content = inputEl.value.trim();
+            if (!content || !chatId) return;
+
+            inputEl.value = "";
+            sendBtn.disabled = true;
+            addMessage("user", content);
+
+            const assistantDiv = addMessage("assistant", "");
+            let fullResponse = "";
+
+            try {
+                const res = await fetch(`/chats/${chatId}/messages/stream`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content, model: modelSelect.value }),
+                });
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() || "";
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data:")) continue;
+                        const jsonStr = line.slice(5).trim();
+                        if (!jsonStr) continue;
+                        const data = JSON.parse(jsonStr);
+
+                        if (data.content) {
+                            fullResponse += data.content;
+                            assistantDiv.innerHTML = `<div class="role">assistant</div>${fullResponse}`;
+                            messagesEl.scrollTop = messagesEl.scrollHeight;
+                        }
+                        if (data.done) break;
+                    }
+                }
+
+                if (!fullResponse) {
+                    assistantDiv.innerHTML = `<div class="role">assistant</div>No response`;
+                }
+            } catch (err) {
+                assistantDiv.innerHTML = `<div class="role">assistant</div>Error: ${err.message}`;
+            }
+
+            sendBtn.disabled = false;
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        sendBtn.addEventListener("click", sendMessage);
+        inputEl.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        document.getElementById("new-chat").addEventListener("click", () => {
+            chatId = null;
+            localStorage.removeItem("chatId");
+            messagesEl.innerHTML = "";
+            ensureChat();
+            inputEl.focus();
+        });
+
+        document.getElementById("file-input").addEventListener("change", async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append("file", file);
+            try {
+                const res = await fetch("/documents", { method: "POST", body: formData });
+                const data = await res.json();
+                addMessage("assistant", `Uploaded: ${data.filename}`);
+            } catch (err) {
+                addMessage("assistant", `Upload error: ${err.message}`);
+            }
+            e.target.value = "";
+        });
+
+        ensureChat();
+        inputEl.focus();
+    </script>
+</body>
+</html>

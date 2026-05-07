@@ -1,0 +1,41 @@
+[project]
+name = "obsolute-slop"
+version = "0.1.0"
+description = "AI-powered English learning assistant with RAG"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.136.1",
+    "numpy>=2.4.4",
+    "openai>=2.34.0",
+    "pdfplumber>=0.11.9",
+    "pydantic>=2.13.3",
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.27",
+    "sqlalchemy>=2.0.49",
+    "sse-starlette>=3.4.1",
+    "uvicorn>=0.46.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=6.2.1",
+    "pytest-mock>=3.14.1",
+    "ruff>=0.11.13",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]
