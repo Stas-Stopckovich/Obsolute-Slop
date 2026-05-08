@@ -40,9 +40,10 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncGenerator[AsyncClient]:
+async def client(mocker) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[chat_get_db] = _override_get_db
     app.dependency_overrides[doc_get_db] = _override_get_db
+    mocker.patch("app.services.chat.async_session_maker", test_session_maker)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
